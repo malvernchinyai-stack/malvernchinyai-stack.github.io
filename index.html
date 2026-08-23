@@ -664,11 +664,11 @@ function lineItemHtml(it,i,locked){
   </div>`;
 }
 function recalcLine(i){const it=editing.items[i];const line=(num(it.qty)*num(it.unitPrice))-num(it.discount);
-  const el=document.getElementById('lt'+i);if(el)el.textContent=money(line,editing.currency);recalc();}
-function addLine(){syncQuote();editing.items.push({name:'',desc:'',qty:1,unitPrice:0,discount:0});
-  document.getElementById('items').innerHTML=editing.items.map((it,i)=>lineItemHtml(it,i,false)).join('');recalc();}
-function rmLine(i){syncQuote();editing.items.splice(i,1);if(!editing.items.length)editing.items.push({name:'',desc:'',qty:1,unitPrice:0,discount:0});
-  document.getElementById('items').innerHTML=editing.items.map((it,i)=>lineItemHtml(it,i,false)).join('');recalc();}
+  const el=document.getElementById('lt'+i);if(el)el.textContent=money(line,editing.currency);recalcActive();}
+function addLine(){syncActive();editing.items.push({name:'',desc:'',qty:1,unitPrice:0,discount:0});
+  document.getElementById('items').innerHTML=editing.items.map((it,i)=>lineItemHtml(it,i,false)).join('');recalcActive();}
+function rmLine(i){syncActive();editing.items.splice(i,1);if(ui.view!=='receiptEdit'&&!editing.items.length)editing.items.push({name:'',desc:'',qty:1,unitPrice:0,discount:0});
+  document.getElementById('items').innerHTML=editing.items.map((it,i)=>lineItemHtml(it,i,false)).join('');recalcActive();}
 function totalsHtml(c,cur){
   let h=`<div class="tr"><span>Subtotal</span><b>${money(c.sub,cur)}</b></div>`;
   if(c.disc>0)h+=`<div class="tr"><span>Discount</span><b>− ${money(c.disc,cur)}</b></div>`;
@@ -731,11 +731,13 @@ function duplicateDoc(){const d=S.documents.find(x=>x.id===editing.id);if(!d)ret
 function convertToReceipt(){const d=S.documents.find(x=>x.id===editing.id);if(!d)return;
   const c=calc(d);
   const r=blankDoc('receipt');r.customerId=d.customerId;r.customerSnapshot=d.customerSnapshot;r.currency=d.currency;
+  r.items=JSON.parse(JSON.stringify(d.items||[]));
+  r.delivery=num(d.delivery);r.installation=num(d.installation);r.overallDiscount=num(d.overallDiscount);
   r.relatedQuotation=d.number;r.contractAmount=c.total;r.amountReceived=d.deposit>0?num(d.deposit):c.total;
   r.previouslyPaid=0;r.paymentDescription='Payment for quotation '+d.number;
   r.template=d.deposit>0?'deposit':'formal';
   d.status='converted';d.updatedAt=new Date().toISOString();save();
-  editing=r;toast('Quotation converted — complete the receipt','ok');go('receiptEdit',{isNew:true});
+  editing=r;toast('Quotation converted — items copied across','ok');go('receiptEdit',{isNew:true});
 }
 
 /* ---------- RECEIPT EDITOR ---------- */
@@ -754,6 +756,11 @@ function viewReceiptEdit(){
         <option ${d.currency==='USD'?'selected':''}>USD</option><option ${d.currency==='ZiG'?'selected':''}>ZiG</option></select></div></div>
     <div class="field"><label>Related quotation (optional)</label><input id="r_rel" value="${esc(d.relatedQuotation||'')}" ${locked?'disabled':''}></div>
   </div>
+
+  <div class="sec-title"><h3>Items being paid for</h3>${locked?'':`<button class="act" style="color:var(--blue);font-weight:800;background:none" onclick="pickProduct()">+ Catalogue</button>`}</div>
+  <div id="items">${(d.items||[]).map((it,i)=>lineItemHtml(it,i,locked)).join('')}</div>
+  ${locked?'':`<button class="btn btn-ghost" onclick="addLine()">${ic.plus} Add item</button>`}
+  <div style="text-align:right;margin:10px 4px 0;font-size:12.5px;color:var(--muted);font-weight:700">Items total: <b id="r_itemstotal" style="color:var(--navy-ink)">${money(itemsSubtotal(d),d.currency)}</b>${locked?'':` &nbsp;<button onclick="applyItemsTotal()" style="background:none;color:var(--blue);font-weight:800;padding:2px 4px">Use as order total →</button>`}</div>
 
   <div class="sec-title"><h3>Payment</h3></div>
   <div class="card">
@@ -787,6 +794,18 @@ function receiptActions(d,locked){
   h+=`</div>`;return h;
 }
 function setRTpl(t){syncReceipt();editing.template=t;render();}
+function itemsSubtotal(d){let s=0;(d.items||[]).forEach(it=>s+=(num(it.qty)*num(it.unitPrice))-num(it.discount));return s;}
+function syncActive(light){if(ui.view==='receiptEdit')syncReceipt();else syncQuote(light);}
+function recalcActive(){
+  if(ui.view==='receiptEdit'){
+    const sub=itemsSubtotal(editing);
+    const el=document.getElementById('r_itemstotal');if(el)el.textContent=money(sub,editing.currency);
+    if(!(num(editing.contractAmount)>0)&&sub>0){editing.contractAmount=sub;const ce=document.getElementById('r_contract');if(ce)ce.value=sub;}
+    recalcReceipt();
+  }else{recalc();}
+}
+function applyItemsTotal(){syncReceipt();const sub=itemsSubtotal(editing);editing.contractAmount=sub;
+  const ce=document.getElementById('r_contract');if(ce)ce.value=sub||'';recalcReceipt();toast('Order total set to items total','ok');}
 function recalcReceipt(){syncReceipt();const bal=num(editing.contractAmount)-num(editing.previouslyPaid)-num(editing.amountReceived);
   const a=document.getElementById('r_thisp'),b=document.getElementById('r_bal');
   if(a)a.textContent=money(editing.amountReceived,editing.currency);if(b)b.textContent=money(Math.max(0,bal),editing.currency);}
@@ -798,6 +817,7 @@ function syncReceipt(){const g=id=>{const e=document.getElementById(id);return e
 function saveReceipt(mode){syncReceipt();
   if(!editing.customerId)return toast('Select a customer','err');
   if(num(editing.amountReceived)<=0)return toast('Enter the amount received','err');
+  editing.items=(editing.items||[]).filter(it=>(it.name||'').trim());
   const isNew=!editing.id;
   if(isNew){editing.id=uid();editing.number=nextNumber('receipt');editing.createdAt=new Date().toISOString();}
   const bal=num(editing.contractAmount)-num(editing.previouslyPaid)-num(editing.amountReceived);
@@ -830,7 +850,7 @@ function pickRow(p){return `<div class="listitem" style="border-radius:10px" onc
 function filterPick(){const t=(document.getElementById('psearch').value||'').toLowerCase();
   const list=S.products.filter(p=>p.active&&[p.name,p.code,p.cat].some(v=>(v||'').toLowerCase().includes(t)));
   document.getElementById('pickList').innerHTML=list.length?list.map(pickRow).join(''):emptyBox(ic.search,'No matches','');}
-function addProduct(id){const p=S.products.find(x=>x.id===id);if(!p)return;syncQuote();
+function addProduct(id){const p=S.products.find(x=>x.id===id);if(!p)return;syncActive();
   if(editing.items.length===1&&!editing.items[0].name.trim())editing.items=[];
   editing.items.push({name:p.name,desc:p.desc,qty:1,unitPrice:p.price,discount:0});closeModal();render();}
 
@@ -1123,6 +1143,9 @@ function tplProject(d){const c=calc(d);return paperCSS()+`<div class="mpaper">${
   ${pSignHTML('For Marimo Solar Energy','Client authorisation')}${pFootHTML()}</div>`;}
 
 /* ---- Receipt templates ---- */
+function receiptItemsHTML(d){const items=(d.items||[]).filter(it=>(it.name||'').trim());if(!items.length)return '';
+  return '<div class="p-sec"><h4>Items paid for</h4></div>'+pItemsHTML(Object.assign({},d,{items}));}
+
 function tplReceiptFormal(d){const cancelled=d.status==='cancelled';
   return paperCSS()+`<div class="mpaper">${pHeadHTML()}
   <div class="p-title"><h1 style="color:#2f9e41">RECEIPT</h1>
@@ -1130,6 +1153,7 @@ function tplReceiptFormal(d){const cancelled=d.status==='cancelled';
   ${cancelled?'<div style="text-align:center;margin-bottom:10px"><span class="p-badge" style="background:#fdecec;color:#c62828">Cancelled — '+esc(d.cancelReason||'')+'</span></div>':''}
   <div class="p-cols">${pPartyHTML(d)}
     <div class="p-box"><div class="lbl">Payment</div><b>${esc(d.paymentMethod)}</b><div class="ln">${d.paymentReference?'Ref: '+esc(d.paymentReference)+'<br>':''}Currency: ${esc(d.currency)}</div></div></div>
+  ${receiptItemsHTML(d)}
   <div class="p-amt-card"><div class="l">Amount received</div><div class="v">${money(d.amountReceived,d.currency)}</div></div>
   <div class="p-words"><b>Amount in words:</b> ${esc(amountWords(d.amountReceived,d.currency))}</div>
   ${d.paymentDescription?`<div class="p-sec"><h4>For</h4><div class="txt">${nl2br(d.paymentDescription)}</div></div>`:''}
@@ -1141,7 +1165,10 @@ function tplReceiptFormal(d){const cancelled=d.status==='cancelled';
   ${pSignHTML('Received by'+(d.receivedBy?': '+esc(d.receivedBy):''),'Customer signature &amp; stamp')}
   ${pFootHTML()}</div>`;}
 
-function tplReceiptCompact(d){return paperCSS()+`<div class="mpaper" style="padding:34px">
+function tplReceiptCompact(d){
+  const items=(d.items||[]).filter(it=>(it.name||'').trim());
+  const itemRows=items.map(it=>`<tr><td class="k">${esc(it.qty)}× ${esc(it.name)}</td><td class="v">${money((num(it.qty)*num(it.unitPrice))-num(it.discount),d.currency)}</td></tr>`).join('');
+  return paperCSS()+`<div class="mpaper" style="padding:34px">
   <div class="p-slip">
     <img src="${LOGO_SRC}" style="height:44px;margin-bottom:10px">
     <div class="rn">RECEIPT ${esc(d.number)}</div>
@@ -1155,6 +1182,8 @@ function tplReceiptCompact(d){return paperCSS()+`<div class="mpaper" style="padd
       ${d.paymentDescription?`<tr><td class="k">For</td><td class="v">${esc(d.paymentDescription)}</td></tr>`:''}
       ${d.relatedQuotation?`<tr><td class="k">Quote</td><td class="v">${esc(d.relatedQuotation)}</td></tr>`:''}
     </table>
+    ${itemRows?`<div style="border-top:1px dashed #cfd6e6;margin-top:10px;padding-top:6px"><div style="font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:#14286b;font-weight:800;text-align:left;margin-bottom:2px">Items paid for</div><table>${itemRows}</table></div>`:''}
+    ${num(d.contractAmount)>0&&num(d.contractAmount)-num(d.previouslyPaid)-num(d.amountReceived)>0.005?`<table><tr><td class="k">Balance remaining</td><td class="v">${money(num(d.contractAmount)-num(d.previouslyPaid)-num(d.amountReceived),d.currency)}</td></tr></table>`:''}
     <div style="border-top:1.5px solid #5a6478;margin-top:26px;padding-top:6px;font-size:10.5px;color:#14286b;font-weight:700">Authorised signature${d.receivedBy?' — '+esc(d.receivedBy):''}</div>
   </div>
   ${pFootHTML()}</div>`;}
@@ -1165,6 +1194,7 @@ function tplReceiptDeposit(d){const bal=Math.max(0,num(d.contractAmount)-num(d.p
     <div class="meta"><b>${esc(d.number)}</b><br>Date: ${fmtDate(d.date)}${d.relatedQuotation?'<br>Ref quote: '+esc(d.relatedQuotation):''}</div></div>
   <div class="p-cols">${pPartyHTML(d)}
     <div class="p-box"><div class="lbl">Payment</div><b>${esc(d.paymentMethod)}</b><div class="ln">${d.paymentReference?'Ref: '+esc(d.paymentReference):''}</div></div></div>
+  ${receiptItemsHTML(d)}
   <div class="p-tot" style="justify-content:stretch"><table style="width:100%">
     <tr><td>Contract / total amount</td><td class="v">${money(d.contractAmount,d.currency)}</td></tr>
     <tr><td>Previously paid</td><td class="v">${money(d.previouslyPaid,d.currency)}</td></tr>
@@ -1218,6 +1248,7 @@ function tplReceiptOfficial(d){const cust=d.customerSnapshot||{};const bal=Math.
     <div class="p-box"><div class="lbl">Being payment for</div><b style="font-size:12px;font-weight:600">${esc(d.paymentDescription||'Solar goods and services')}</b></div>
     <div class="p-box"><div class="lbl">Payment details</div><div class="ln">${d.paymentReference?'Reference: '+esc(d.paymentReference)+'<br>':''}Method: ${esc(d.paymentMethod)}<br>Currency: ${esc(d.currency)}</div></div>
   </div>
+  ${receiptItemsHTML(d)}
   ${num(d.contractAmount)>0?`<div class="p-tot"><table>
     <tr><td>Contract / total amount</td><td class="v">${money(d.contractAmount,d.currency)}</td></tr>
     ${num(d.previouslyPaid)>0?`<tr><td>Previously paid</td><td class="v">${money(d.previouslyPaid,d.currency)}</td></tr>`:''}
