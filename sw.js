@@ -1,7 +1,7 @@
 /* Marimo Solar — offline service worker.
    IMPORTANT: whenever you upload a new index.html, change the version
    below (e.g. marimo-v1 -> marimo-v2) so phones pick up the new version. */
-const CACHE = 'marimo-v6';
+const CACHE = 'marimo-v8';
 const ASSETS = [
   './',
   './index.html',
